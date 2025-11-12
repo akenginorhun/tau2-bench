@@ -208,6 +208,7 @@ def run_tau2_simulations(args: argparse.Namespace, api_base: str) -> None:
     """
     Execute tau2 simulations for the requested domains using the local vLLM model.
     """
+    # Build agent LLM args and apply safe defaults for provider/tool choice if not set
     agent_llm_args = build_llm_args(
         defaults=DEFAULT_LLM_ARGS_AGENT,
         api_base=api_base,
@@ -216,9 +217,14 @@ def run_tau2_simulations(args: argparse.Namespace, api_base: str) -> None:
         max_tokens=args.agent_max_tokens,
         extra_args=args.agent_arg,
     )
+    if "custom_llm_provider" not in agent_llm_args:
+        agent_llm_args["custom_llm_provider"] = "openai"
+    if "tool_choice" not in agent_llm_args:
+        agent_llm_args["tool_choice"] = "required"
 
     if args.user_llm is None:
         user_llm = args.model
+        # Build user LLM args and apply defaults (no tools requested by user)
         user_llm_args = build_llm_args(
             defaults=DEFAULT_LLM_ARGS_USER,
             api_base=api_base,
@@ -227,11 +233,19 @@ def run_tau2_simulations(args: argparse.Namespace, api_base: str) -> None:
             max_tokens=args.user_max_tokens,
             extra_args=args.user_arg,
         )
+        if "custom_llm_provider" not in user_llm_args:
+            user_llm_args["custom_llm_provider"] = "openai"
+        if "tool_choice" not in user_llm_args:
+            user_llm_args["tool_choice"] = "none"
     else:
         user_llm = args.user_llm
         user_llm_args = deepcopy(DEFAULT_LLM_ARGS_USER)
         if args.user_arg:
             user_llm_args.update(parse_kv_pairs(args.user_arg))
+        if "custom_llm_provider" not in user_llm_args:
+            user_llm_args["custom_llm_provider"] = "openai"
+        if "tool_choice" not in user_llm_args:
+            user_llm_args["tool_choice"] = "none"
 
     for domain in args.domains:
         logger.info("Running tau2 domain '%s' with model '%s'", domain, args.model)
