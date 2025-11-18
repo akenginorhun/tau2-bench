@@ -1,28 +1,25 @@
 #!/usr/bin/env python3
 """
-Utility script for running tau2 simulations against a locally hosted vLLM model.
+Utility script for running tau2 simulations against a vLLM server.
+
+You can now pre-initialize the vLLM server once via ``initialize_vllm.py`` and
+reuse its API endpoint for multiple benchmark runs by pointing ``run_tau2.py``
+at the desired ``--api-base`` (or ``--client-host``/``--vllm-port`` combo).
 
 Example:
+    python initialize_vllm.py --model meta-llama/Llama-3.1-8B-Instruct
     python run_tau2.py \
         --model meta-llama/Llama-3.1-8B-Instruct \
         --domains airline retail \
         --num-trials 1 \
-        --num-tasks 5
+        --num-tasks 5 \
+        --api-base http://127.0.0.1:8008/v1
 """
 
 from __future__ import annotations
 
 import argparse
-import os
-import shlex
-import signal
-import subprocess
-import sys
-import time
-import urllib.error
-import urllib.request
 from copy import deepcopy
-from pathlib import Path
 from typing import Optional
 
 from loguru import logger
@@ -65,121 +62,6 @@ def parse_kv_pairs(pairs: list[str]) -> dict:
         key, value = pair.split("=", 1)
         parsed[key.strip()] = _convert(value)
     return parsed
-
-
-def wait_for_vllm(
-    base_url: str,
-    process: Optional[subprocess.Popen],
-    timeout: int,
-    api_key: Optional[str] = None,
-) -> None:
-    """
-    Wait until the vLLM OpenAI-compatible server is ready.
-    """
-    deadline = time.time() + timeout
-    status_url = f"{base_url.rstrip('/')}/models"
-    last_error: Optional[str] = None
-
-    while time.time() < deadline:
-        if process is not None and process.poll() is not None:
-            raise RuntimeError(
-                "vLLM server process exited prematurely with return code "
-                f"{process.returncode}."
-            )
-        try:
-            request = urllib.request.Request(status_url)
-            if api_key:
-                request.add_header("Authorization", f"Bearer {api_key}")
-            with urllib.request.urlopen(request) as response:
-                if response.status == 200:
-                    logger.info("vLLM server is ready.")
-                    return
-        except urllib.error.HTTPError as exc:
-            # 401 / 403 indicate server is up but requires auth.
-            if exc.code in {401, 403, 404}:
-                logger.info("vLLM server is ready (received HTTP %s).", exc.code)
-                return
-            last_error = f"HTTP {exc.code}"
-        except urllib.error.URLError as exc:
-            last_error = str(exc.reason)
-        time.sleep(1)
-
-    error_suffix = f": {last_error}" if last_error else ""
-    raise TimeoutError(f"Timed out waiting for vLLM server to start{error_suffix}.")
-
-
-def launch_vllm(args: argparse.Namespace) -> tuple[Optional[subprocess.Popen], str]:
-    """
-    Launch (or validate) the vLLM OpenAI-compatible server.
-    Returns the process handle (if we started one) and the api_base URL.
-    """
-    api_base = args.api_base
-    if api_base is None:
-        host_for_client = args.client_host or args.vllm_host
-        api_base = f"http://{host_for_client}:{args.vllm_port}/v1"
-
-    if args.reuse_vllm:
-        logger.info("Reusing existing vLLM server at %s", api_base)
-        wait_for_vllm(
-            api_base,
-            process=None,
-            timeout=args.startup_timeout,
-            api_key=args.api_key,
-        )
-        return None, api_base
-
-    command = [
-        sys.executable,
-        "-m",
-        "vllm.entrypoints.openai.api_server",
-        "--model",
-        args.model,
-        "--host",
-        args.vllm_host,
-        "--port",
-        str(args.vllm_port),
-    ]
-
-    if args.download_dir is not None:
-        command.extend(["--download-dir", args.download_dir])
-    if args.tensor_parallel_size is not None:
-        command.extend(["--tensor-parallel-size", str(args.tensor_parallel_size)])
-    if args.max_model_len is not None:
-        command.extend(["--max-model-len", str(args.max_model_len)])
-    if args.gpu_memory_utilization is not None:
-        command.extend(["--gpu-memory-utilization", str(args.gpu_memory_utilization)])
-    if args.dtype is not None:
-        command.extend(["--dtype", args.dtype])
-    if args.vllm_extra_arg:
-        for extra in args.vllm_extra_arg:
-            command.extend(shlex.split(extra))
-
-    env = os.environ.copy()
-    if args.vllm_env:
-        for pair in args.vllm_env:
-            if "=" not in pair:
-                raise ValueError(
-                    f"Invalid --vllm-env entry '{pair}'. Expected KEY=value."
-                )
-            key, value = pair.split("=", 1)
-            env[key.strip()] = value
-
-    logger.info("Starting vLLM server:\n%s", " ".join(shlex.quote(c) for c in command))
-    process = subprocess.Popen(command, env=env)
-
-    try:
-        wait_for_vllm(
-            api_base,
-            process=process,
-            timeout=args.startup_timeout,
-            api_key=args.api_key,
-        )
-    except Exception:
-        process.terminate()
-        process.wait(timeout=10)
-        raise
-
-    return process, api_base
 
 
 def build_llm_args(
@@ -420,69 +302,10 @@ def parse_args() -> argparse.Namespace:
         help="Host used by the client when constructing the API base (defaults to 127.0.0.1).",
     )
     parser.add_argument(
-        "--vllm-host",
-        default="0.0.0.0",
-        help="Host interface for serving the vLLM OpenAI API.",
-    )
-    parser.add_argument(
         "--vllm-port",
         type=int,
         default=8008,
         help="Port for the vLLM OpenAI API server.",
-    )
-    parser.add_argument(
-        "--download-dir",
-        default=None,
-        help="Optional model download/cache directory for vLLM.",
-    )
-    parser.add_argument(
-        "--tensor-parallel-size",
-        type=int,
-        default=None,
-        help="Number of tensor parallel partitions.",
-    )
-    parser.add_argument(
-        "--max-model-len",
-        type=int,
-        default=None,
-        help="Override vLLM max_model_len.",
-    )
-    parser.add_argument(
-        "--gpu-memory-utilization",
-        type=float,
-        default=None,
-        help="Fraction of GPU memory to allocate for the model.",
-    )
-    parser.add_argument(
-        "--dtype",
-        default=None,
-        help="dtype flag forwarded to vLLM (e.g. auto, float16, bfloat16).",
-    )
-    parser.add_argument(
-        "--vllm-extra-arg",
-        action="append",
-        help="Extra argument string forwarded to vLLM (quotes required).",
-    )
-    parser.add_argument(
-        "--vllm-env",
-        action="append",
-        help="Environment variable overrides for the vLLM process (KEY=value).",
-    )
-    parser.add_argument(
-        "--reuse-vllm",
-        action="store_true",
-        help="Skip launching vLLM and reuse an already running server.",
-    )
-    parser.add_argument(
-        "--keep-vllm",
-        action="store_true",
-        help="Keep the vLLM server running after simulations finish.",
-    )
-    parser.add_argument(
-        "--startup-timeout",
-        type=int,
-        default=180,
-        help="Seconds to wait for vLLM server readiness.",
     )
 
     return parser.parse_args()
@@ -490,34 +313,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-
-    vllm_process: Optional[subprocess.Popen] = None
-
-    def _cleanup(signum=None, frame=None) -> None:  # type: ignore[override]
-        if vllm_process is None:
-            return
-        if args.keep_vllm:
-            logger.info("Keeping vLLM server alive (per --keep-vllm).")
-            return
-        logger.info("Shutting down vLLM server...")
-        vllm_process.terminate()
-        try:
-            vllm_process.wait(timeout=20)
-        except subprocess.TimeoutExpired:
-            logger.warning("Force killing vLLM server after timeout.")
-            vllm_process.kill()
-
-    def _handle_signal(signum, frame):
-        _cleanup(signum, frame)
-        sys.exit(0)
-
-    try:
-        vllm_process, api_base = launch_vllm(args)
-        signal.signal(signal.SIGINT, _handle_signal)
-        signal.signal(signal.SIGTERM, _handle_signal)
-        run_tau2_simulations(args, api_base=api_base)
-    finally:
-        _cleanup()
+    api_base = args.api_base or f"http://{args.client_host}:{args.vllm_port}/v1"
+    logger.info("Using vLLM endpoint at %s", api_base)
+    run_tau2_simulations(args, api_base=api_base)
 
 
 if __name__ == "__main__":
