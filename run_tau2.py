@@ -320,12 +320,17 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    api_base = args.api_base or f"http://{args.client_host}:{args.vllm_port}/v1"
-    logger.info("Using vLLM endpoint at %s", api_base)
     
-    # Suppress LiteLLM cost mapping warnings by setting higher log level
+    # Suppress LiteLLM cost mapping warnings - must be set before any imports
+    import os
+    os.environ["LITELLM_LOG"] = "CRITICAL"
+    
+    # Also suppress standard logging
     import logging
     logging.getLogger("litellm").setLevel(logging.CRITICAL)
+    
+    api_base = args.api_base or f"http://{args.client_host}:{args.vllm_port}/v1"
+    logger.info("Using vLLM endpoint at %s", api_base)
     
     # Override log level for detailed tracing if requested
     if args.verbose:
