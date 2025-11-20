@@ -309,6 +309,11 @@ def parse_args() -> argparse.Namespace:
         default=8008,
         help="Port for the vLLM OpenAI API server.",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable detailed agent behavior tracing (sets log level to DEBUG).",
+    )
 
     return parser.parse_args()
 
@@ -317,6 +322,15 @@ def main() -> None:
     args = parse_args()
     api_base = args.api_base or f"http://{args.client_host}:{args.vllm_port}/v1"
     logger.info("Using vLLM endpoint at %s", api_base)
+    
+    # Suppress LiteLLM cost mapping warnings by setting higher log level
+    import logging
+    logging.getLogger("litellm").setLevel(logging.CRITICAL)
+    
+    # Override log level for detailed tracing if requested
+    if args.verbose:
+        args.log_level = "DEBUG"
+    
     run_tau2_simulations(args, api_base=api_base)
 
 
