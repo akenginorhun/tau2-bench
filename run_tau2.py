@@ -23,6 +23,7 @@ from copy import deepcopy
 from typing import Optional
 
 from loguru import logger
+import litellm
 
 from tau2.config import (
     DEFAULT_LLM_ARGS_AGENT,
@@ -86,6 +87,33 @@ def build_llm_args(
     return llm_args
 
 
+def register_custom_pricing(model_name: Optional[str], context_length: int = 40960) -> None:
+    """
+    Inject a zero-cost pricing entry for models unknown to LiteLLM so completion_cost
+    doesn't raise and spam the logs.
+    """
+    if not model_name:
+        return
+    if not hasattr(litellm, "custom_pricing"):
+        litellm.custom_pricing = {}
+    if model_name in getattr(litellm, "model_prices_and_context_window", {}):
+        return
+    if model_name in litellm.custom_pricing:
+        return
+    litellm.custom_pricing[model_name] = {
+        "input_cost_per_token": 0.0,
+        "output_cost_per_token": 0.0,
+        "cache_creation_input_cost_per_token": 0.0,
+        "cache_read_input_cost_per_token": 0.0,
+        "context_length": context_length,
+    }
+    logger.debug(
+        "Registered custom LiteLLM pricing entry for %s (context=%s tokens).",
+        model_name,
+        context_length,
+    )
+
+
 def run_tau2_simulations(args: argparse.Namespace, api_base: str) -> None:
     """
     Execute tau2 simulations for the requested domains using the local vLLM model.
@@ -130,6 +158,9 @@ def run_tau2_simulations(args: argparse.Namespace, api_base: str) -> None:
             user_llm_args["custom_llm_provider"] = "openai"
         # if "tool_choice" not in user_llm_args:
         #     user_llm_args["tool_choice"] = "auto"
+
+    register_custom_pricing(args.model)
+    register_custom_pricing(user_llm)
 
     for domain in args.domains:
         logger.info("Running tau2 domain '%s' with model '%s'", domain, args.model)
@@ -309,7 +340,6 @@ def parse_args() -> argparse.Namespace:
         default=8008,
         help="Port for the vLLM OpenAI API server.",
     )
-
     return parser.parse_args()
 
 
