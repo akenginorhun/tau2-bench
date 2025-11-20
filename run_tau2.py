@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import argparse
 from copy import deepcopy
-from typing import Optional
+from typing import Optional, Set
 
 from loguru import logger
 import litellm
@@ -87,7 +87,7 @@ def build_llm_args(
     return llm_args
 
 
-def register_custom_pricing(model_name: Optional[str], context_length: int = 40960) -> None:
+def register_custom_pricing(model_name: Optional[str], context_length: int) -> None:
     """
     Inject a zero-cost pricing entry for models unknown to LiteLLM so completion_cost
     doesn't raise and spam the logs.
@@ -112,6 +112,11 @@ def register_custom_pricing(model_name: Optional[str], context_length: int = 409
         model_name,
         context_length,
     )
+
+
+def maybe_register_pricing(models: Set[str], context_length: int) -> None:
+    for model_name in models:
+        register_custom_pricing(model_name, context_length)
 
 
 def run_tau2_simulations(args: argparse.Namespace, api_base: str) -> None:
@@ -159,8 +164,11 @@ def run_tau2_simulations(args: argparse.Namespace, api_base: str) -> None:
         # if "tool_choice" not in user_llm_args:
         #     user_llm_args["tool_choice"] = "auto"
 
-    register_custom_pricing(args.model)
-    register_custom_pricing(user_llm)
+    if args.silence_cost_warnings:
+        maybe_register_pricing(
+            {args.model, user_llm},
+            context_length=args.pricing_context_len,
+        )
 
     for domain in args.domains:
         logger.info("Running tau2 domain '%s' with model '%s'", domain, args.model)
@@ -340,11 +348,34 @@ def parse_args() -> argparse.Namespace:
         default=8008,
         help="Port for the vLLM OpenAI API server.",
     )
+    parser.add_argument(
+        "--trace",
+        action="store_true",
+        help="Enable detailed DEBUG logs and run simulations serially for easier tracing.",
+    )
+    parser.add_argument(
+        "--silence-cost-warnings",
+        action="store_true",
+        help="Register custom LiteLLM pricing entries for local models to suppress 'model isn't mapped yet' errors.",
+    )
+    parser.add_argument(
+        "--pricing-context-len",
+        type=int,
+        default=40960,
+        help="Context length to use when synthesizing LiteLLM pricing entries (used with --silence-cost-warnings).",
+    )
+
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    if args.trace:
+        logger.info(
+            "Trace mode enabled: forcing DEBUG log level and max concurrency = 1."
+        )
+        args.log_level = "DEBUG"
+        args.max_concurrency = 1
     api_base = args.api_base or f"http://{args.client_host}:{args.vllm_port}/v1"
     logger.info("Using vLLM endpoint at %s", api_base)
     run_tau2_simulations(args, api_base=api_base)
