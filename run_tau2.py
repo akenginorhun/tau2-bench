@@ -101,8 +101,10 @@ def run_tau2_simulations(args: argparse.Namespace, api_base: str) -> None:
     )
     if "custom_llm_provider" not in agent_llm_args:
         agent_llm_args["custom_llm_provider"] = "openai"
-    if "tool_choice" not in agent_llm_args:
-        agent_llm_args["tool_choice"] = "auto"
+    
+    # vLLM hack: force tool_choice=None to avoid "auto" errors if server doesn't support it.
+    # The model (Qwen + hermes parser) will still produce tool calls naturally.
+    agent_llm_args["tool_choice"] = None
 
     if args.user_llm is None:
         user_llm = args.model
@@ -117,8 +119,8 @@ def run_tau2_simulations(args: argparse.Namespace, api_base: str) -> None:
         )
         if "custom_llm_provider" not in user_llm_args:
             user_llm_args["custom_llm_provider"] = "openai"
-        if "tool_choice" not in user_llm_args:
-            user_llm_args["tool_choice"] = "auto"
+        # if "tool_choice" not in user_llm_args:
+        #     user_llm_args["tool_choice"] = "auto"
     else:
         user_llm = args.user_llm
         user_llm_args = deepcopy(DEFAULT_LLM_ARGS_USER)
@@ -126,8 +128,8 @@ def run_tau2_simulations(args: argparse.Namespace, api_base: str) -> None:
             user_llm_args.update(parse_kv_pairs(args.user_arg))
         if "custom_llm_provider" not in user_llm_args:
             user_llm_args["custom_llm_provider"] = "openai"
-        if "tool_choice" not in user_llm_args:
-            user_llm_args["tool_choice"] = "auto"
+        # if "tool_choice" not in user_llm_args:
+        #     user_llm_args["tool_choice"] = "auto"
 
     for domain in args.domains:
         logger.info("Running tau2 domain '%s' with model '%s'", domain, args.model)
