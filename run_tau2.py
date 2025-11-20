@@ -320,33 +320,32 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    
-    # Suppress LiteLLM cost mapping warnings - must be set before any imports
-    import os
-    os.environ["LITELLM_LOG"] = "CRITICAL"
-    
-    # Also suppress standard logging
-    import logging
-    logging.getLogger("litellm").setLevel(logging.CRITICAL)
-    
     api_base = args.api_base or f"http://{args.client_host}:{args.vllm_port}/v1"
-    
+    logger.info("Using vLLM endpoint at %s", api_base)
+
     # Override log level for detailed tracing if requested
     if args.verbose:
         args.log_level = "DEBUG"
         
-    # Reconfigure logger to filter out the specific cost mapping error
-    # This is required because tau2.utils.llm_utils catches the exception and explicitly logs it
-    def filter_cost_errors(record):
-        return "This model isn't mapped yet" not in record["message"]
+    # Monkeypatch tau2.utils.llm_utils.get_response_cost to silence the "model isn't mapped" error
+    try:
+        from tau2.utils import llm_utils
+        from litellm import completion_cost
         
-    logger.remove()
-    # We use sys.stderr by default like standard loguru, but with our filter
-    import sys
-    logger.add(sys.stderr, level=args.log_level, filter=filter_cost_errors)
-    
-    logger.info("Using vLLM endpoint at %s", api_base)
-    
+        def quiet_get_response_cost(response) -> float:
+            # Logic copied from src/tau2/utils/llm_utils.py but without logger.error(e)
+            response.model = llm_utils._parse_ft_model_name(response.model)
+            try:
+                cost = completion_cost(completion_response=response)
+            except Exception:
+                # logger.error(e) -> Suppressed
+                return 0.0
+            return cost
+            
+        llm_utils.get_response_cost = quiet_get_response_cost
+    except ImportError:
+        logger.warning("Could not patch llm_utils to silence cost errors.")
+
     run_tau2_simulations(args, api_base=api_base)
 
 
