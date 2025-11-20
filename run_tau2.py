@@ -330,11 +330,22 @@ def main() -> None:
     logging.getLogger("litellm").setLevel(logging.CRITICAL)
     
     api_base = args.api_base or f"http://{args.client_host}:{args.vllm_port}/v1"
-    logger.info("Using vLLM endpoint at %s", api_base)
     
     # Override log level for detailed tracing if requested
     if args.verbose:
         args.log_level = "DEBUG"
+        
+    # Reconfigure logger to filter out the specific cost mapping error
+    # This is required because tau2.utils.llm_utils catches the exception and explicitly logs it
+    def filter_cost_errors(record):
+        return "This model isn't mapped yet" not in record["message"]
+        
+    logger.remove()
+    # We use sys.stderr by default like standard loguru, but with our filter
+    import sys
+    logger.add(sys.stderr, level=args.log_level, filter=filter_cost_errors)
+    
+    logger.info("Using vLLM endpoint at %s", api_base)
     
     run_tau2_simulations(args, api_base=api_base)
 
