@@ -205,7 +205,13 @@ def generate(
     tools = [tool.openai_schema for tool in tools] if tools else None
     if tools and tool_choice is None:
         tool_choice = "auto"
+    if not tools and tool_choice is not None:
+        tool_choice = None
     try:
+        # Fix for OpenAI 400 error when tool_choice is set but tools is empty/None
+        if not tools and tool_choice is not None:
+            tool_choice = None
+
         response = completion(
             model=model,
             messages=litellm_messages,
