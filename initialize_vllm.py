@@ -95,6 +95,10 @@ def build_vllm_command(args: argparse.Namespace) -> list[str]:
         command.extend(["--gpu-memory-utilization", str(args.gpu_memory_utilization)])
     if args.dtype is not None:
         command.extend(["--dtype", args.dtype])
+    if args.enable_auto_tool_choice:
+        command.append("--enable-auto-tool-choice")
+    if args.tool_call_parser:
+        command.extend(["--tool-call-parser", args.tool_call_parser])
     if args.vllm_extra_arg:
         for extra in args.vllm_extra_arg:
             command.extend(shlex.split(extra))
@@ -189,6 +193,17 @@ def parse_args() -> argparse.Namespace:
         "--dtype",
         default=None,
         help="dtype flag forwarded to vLLM (e.g. auto, float16, bfloat16).",
+    )
+    parser.add_argument(
+        "--enable-auto-tool-choice",
+        action="store_true",
+        help="Enable auto tool choice for vLLM.",
+    )
+    parser.add_argument(
+        "--tool-call-parser",
+        type=str,
+        default=None,
+        help="Tool call parser for vLLM (e.g. 'hermes').",
     )
     parser.add_argument(
         "--vllm-extra-arg",
