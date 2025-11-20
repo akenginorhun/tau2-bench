@@ -102,7 +102,7 @@ def run_tau2_simulations(args: argparse.Namespace, api_base: str) -> None:
     if "custom_llm_provider" not in agent_llm_args:
         agent_llm_args["custom_llm_provider"] = "openai"
     if "tool_choice" not in agent_llm_args:
-        agent_llm_args["tool_choice"] = "required"
+        agent_llm_args["tool_choice"] = "auto"
 
     if args.user_llm is None:
         user_llm = args.model
@@ -118,7 +118,7 @@ def run_tau2_simulations(args: argparse.Namespace, api_base: str) -> None:
         if "custom_llm_provider" not in user_llm_args:
             user_llm_args["custom_llm_provider"] = "openai"
         if "tool_choice" not in user_llm_args:
-            user_llm_args["tool_choice"] = "none"
+            user_llm_args["tool_choice"] = "auto"
     else:
         user_llm = args.user_llm
         user_llm_args = deepcopy(DEFAULT_LLM_ARGS_USER)
@@ -127,7 +127,7 @@ def run_tau2_simulations(args: argparse.Namespace, api_base: str) -> None:
         if "custom_llm_provider" not in user_llm_args:
             user_llm_args["custom_llm_provider"] = "openai"
         if "tool_choice" not in user_llm_args:
-            user_llm_args["tool_choice"] = "none"
+            user_llm_args["tool_choice"] = "auto"
 
     for domain in args.domains:
         logger.info("Running tau2 domain '%s' with model '%s'", domain, args.model)
